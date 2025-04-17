@@ -1,6 +1,6 @@
 # Deploying OpenHands on a Custom Server
 
-This guide provides detailed instructions for deploying OpenHands on your own server infrastructure. It covers both Docker-based deployment (recommended for production) and building from source (for development or customization).
+This guide provides detailed instructions for deploying OpenHands on your own server infrastructure. It covers Docker-based deployment (recommended for production), building from source (for development or customization), and deploying without Docker (for environments where Docker is not available).
 
 ## Table of Contents
 
@@ -15,6 +15,11 @@ This guide provides detailed instructions for deploying OpenHands on your own se
   - [Installation Steps](#installation-steps)
   - [Configuration](#configuration)
   - [Running the Application](#running-the-application)
+- [Deploying Without Docker](#deploying-without-docker)
+  - [System Setup](#system-setup)
+  - [Installation Process](#installation-process)
+  - [Running OpenHands](#running-openhands)
+  - [Production Deployment](#production-deployment)
 - [LLM Configuration](#llm-configuration)
 - [Advanced Deployment Options](#advanced-deployment-options)
   - [Headless Mode](#headless-mode)
@@ -258,6 +263,209 @@ api_key = "your-api-key-here"
    ```
 
 3. Access OpenHands at `http://your-server-ip:3000`
+
+## Deploying Without Docker
+
+While Docker is the recommended deployment method, you can deploy OpenHands without Docker for environments where Docker is not available or not preferred.
+
+### System Setup
+
+1. Ensure your system meets these requirements:
+   - Linux (Ubuntu 22.04+ recommended) or macOS
+   - Python 3.12
+   - Node.js 22.x or later
+   - Git
+
+2. Install system dependencies:
+
+   **Ubuntu/Debian:**
+   ```bash
+   # Update package lists
+   sudo apt update
+   
+   # Install build essentials and other dependencies
+   sudo apt install -y build-essential netcat curl git
+   
+   # Install Python 3.12
+   sudo add-apt-repository ppa:deadsnakes/ppa
+   sudo apt update
+   sudo apt install -y python3.12 python3.12-venv python3.12-dev
+   
+   # Install Node.js 22.x
+   curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+   sudo apt install -y nodejs
+   
+   # Install Poetry
+   curl -sSL https://install.python-poetry.org | python3.12 -
+   
+   # Add Poetry to PATH
+   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+   source ~/.bashrc
+   ```
+
+   **macOS:**
+   ```bash
+   # Install Homebrew if not already installed
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   
+   # Install Python 3.12
+   brew install python@3.12
+   
+   # Install Node.js
+   brew install node@22
+   
+   # Install Poetry
+   curl -sSL https://install.python-poetry.org | python3.12 -
+   
+   # Add Poetry to PATH
+   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+   source ~/.zshrc
+   ```
+
+### Installation Process
+
+1. Clone the OpenHands repository:
+   ```bash
+   git clone https://github.com/All-Hands-AI/OpenHands.git
+   cd OpenHands
+   ```
+
+2. Create a Python virtual environment:
+   ```bash
+   python3.12 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+3. Install Python dependencies:
+   ```bash
+   pip install poetry
+   poetry install
+   ```
+
+4. Install frontend dependencies and build the frontend:
+   ```bash
+   cd frontend
+   npm install
+   npm run build
+   cd ..
+   ```
+
+5. Create a configuration file:
+   ```bash
+   # Create a basic config.toml file
+   cat > config.toml << EOL
+   [core]
+   workspace_base = "/path/to/your/workspace"
+   
+   [llm]
+   model = "anthropic/claude-3-5-sonnet-20241022"
+   api_key = "your-api-key-here"
+   # base_url = "http://localhost:5001/v1/" # Uncomment for local LLMs
+   EOL
+   ```
+
+6. Edit the config.toml file to set your workspace path and LLM API key:
+   ```bash
+   nano config.toml
+   ```
+
+### Running OpenHands
+
+1. Start the backend server:
+   ```bash
+   # Activate the virtual environment if not already activated
+   source .venv/bin/activate
+   
+   # Start the backend
+   poetry run python -m openhands.server
+   ```
+
+2. In a separate terminal, start the frontend server:
+   ```bash
+   cd frontend
+   npm run dev -- --host 0.0.0.0 --port 3000
+   ```
+
+3. Access OpenHands at `http://your-server-ip:3000`
+
+### Production Deployment
+
+For a production environment without Docker, you should:
+
+1. Use a process manager like Supervisor or systemd to ensure the application stays running:
+
+   **Example systemd service file** (save as `/etc/systemd/system/openhands-backend.service`):
+   ```ini
+   [Unit]
+   Description=OpenHands Backend
+   After=network.target
+   
+   [Service]
+   User=your_username
+   WorkingDirectory=/path/to/OpenHands
+   ExecStart=/path/to/OpenHands/.venv/bin/python -m openhands.server
+   Restart=always
+   RestartSec=5
+   Environment=PATH=/path/to/OpenHands/.venv/bin:/usr/local/bin:/usr/bin:/bin
+   
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+2. Use a production-ready web server for the frontend:
+   ```bash
+   # Install a production web server like nginx
+   sudo apt install -y nginx
+   
+   # Build the frontend for production
+   cd frontend
+   npm run build
+   
+   # Configure nginx to serve the frontend
+   sudo nano /etc/nginx/sites-available/openhands
+   ```
+
+   **Example nginx configuration**:
+   ```nginx
+   server {
+       listen 80;
+       server_name your-server-domain.com;
+       
+       # Frontend
+       location / {
+           root /path/to/OpenHands/frontend/dist;
+           try_files $uri $uri/ /index.html;
+       }
+       
+       # Backend API
+       location /api/ {
+           proxy_pass http://localhost:8000;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           
+           # WebSocket support
+           proxy_http_version 1.1;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+       }
+   }
+   ```
+
+3. Enable and start the services:
+   ```bash
+   sudo ln -s /etc/nginx/sites-available/openhands /etc/nginx/sites-enabled/
+   sudo systemctl enable openhands-backend
+   sudo systemctl start openhands-backend
+   sudo systemctl restart nginx
+   ```
+
+4. Set up HTTPS with Let's Encrypt:
+   ```bash
+   sudo apt install -y certbot python3-certbot-nginx
+   sudo certbot --nginx -d your-server-domain.com
+   ```
 
 ## LLM Configuration
 
